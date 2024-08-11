@@ -1,0 +1,108 @@
+#include <Arduino.h>
+
+const byte npulse = 12;
+const byte pin_pulse = A0;
+const byte pin_cap = A1;
+const byte pin_LED = 12;
+const byte pin_buzzer = 13;
+
+const float referenceResistor = 1220.0;
+const float referenceVoltage = 5.0;
+
+float calibrationSlope = 1.2245;
+float calibrationIntercept = -37;
+
+const int nmeas = 256;
+
+void setup() {
+  pinMode(pin_pulse, OUTPUT);
+  pinMode(pin_cap, INPUT);
+  pinMode(pin_LED, OUTPUT);
+  pinMode(pin_buzzer, OUTPUT);
+  Serial.begin(9600);
+}
+
+void loop() {
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    if (input.startsWith("calibrate ")) {
+      calibrate(input);
+    }
+  }
+
+  float resistance = measureResistance();
+  float distance = calculateDistance(resistance);
+
+  Serial.print("Resistance: ");
+  Serial.print(resistance, 2);
+  Serial.print(", Distance to metal: ");
+  Serial.print(distance, 2);
+  Serial.println(" cm");
+
+  controlIndicators(distance);
+}
+
+void calibrate(String input) {
+  int sepIndex = input.indexOf(' ');
+  String slopeString = input.substring(sepIndex + 1, input.indexOf(' ', sepIndex + 1));
+  String interceptString = input.substring(input.lastIndexOf(' ') + 1);
+
+  calibrationSlope = slopeString.toFloat();
+  calibrationIntercept = interceptString.toFloat();
+
+  Serial.print("New Calibration -> Slope: ");
+  Serial.print(calibrationSlope);
+  Serial.print(", Intercept: ");
+  Serial.println(calibrationIntercept);
+}
+
+float measureResistance() {
+  long sum = 0;
+  for (int imeas = 0; imeas < nmeas; imeas++) {
+    pinMode(pin_cap, OUTPUT);
+    digitalWrite(pin_cap, LOW);
+    delayMicroseconds(50);
+    pinMode(pin_cap, INPUT);
+    delayMicroseconds(10);
+
+    for (int ipulse = 0; ipulse < npulse; ipulse++) {
+      digitalWrite(pin_pulse, HIGH);
+      delayMicroseconds(3);
+      digitalWrite(pin_pulse, LOW);
+      delayMicroseconds(3);
+    }
+
+    sum += analogRead(pin_cap);
+  }
+
+  long avgVal = sum / nmeas;
+  float measuredVoltage = (float)avgVal * (referenceVoltage / 1023.0);
+  return (measuredVoltage / referenceVoltage) * referenceResistor;
+}
+
+float calculateDistance(float resistance) {
+  return (resistance * calibrationSlope) + calibrationIntercept;
+}
+
+void beepBuzzer(int beepDuration, int pauseDuration) {
+  digitalWrite(pin_buzzer, HIGH);
+  delay(beepDuration);
+  digitalWrite(pin_buzzer, LOW);
+  delay(pauseDuration);
+}
+
+void controlIndicators(float distance) {
+  if (distance <= 10.0) {
+    digitalWrite(pin_LED, HIGH);
+    // More frequent beeps as the metal gets closer
+    int beepDuration = 50; // Duration of each beep in milliseconds
+    int pauseDuration = map(distance, 0, 10, 50, 300); // Map distance to pause duration
+
+    unsigned long startTime = millis();
+    while (millis() - startTime < 1000) { // Beep for 1 second
+      beepBuzzer(beepDuration, pauseDuration);
+    }
+  } else {
+    digitalWrite(pin_LED, LOW);
+  }
+}
